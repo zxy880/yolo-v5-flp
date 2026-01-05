@@ -1,0 +1,8 @@
+
+path: D:\weixinchat\xwechat_files\wxid_wd407o19913i22_be83\msg\file\2025-09\z-model\yolov5-ghost-se-epaiou\new data\HRSID_JPG # dataset root dir
+train: train.txt  # train images (relative to 'path') 
+val: val.txt  # val images (relative to 'path') 
+
+# Classes
+nc: 1  # number of classes
+names: ['ship']  # class names
