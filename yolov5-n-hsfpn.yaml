@@ -5,9 +5,9 @@ nc: 1  # number of classes
 depth_multiple: 0.33  # model depth multiple
 width_multiple: 0.25  # layer channel multiple
 anchors:
-  - [10,13, 16,30, 33,23]  # P3/8
-  - [30,61, 62,45, 59,119]  # P4/16
-  - [116,90, 156,198, 373,326]  # P5/32
+  - [10,13, 18,9, 15,36]      # P3/8  (对应聚类结果中的小尺度: 10x13, 18x9, 15x36) 
+  - [49,14, 29,35, 46,27]      # P4/16 (对应聚类结果中的中尺度: 49x14, 29x35, 46x27) 
+  - [41,83, 112,39, 179,207]    # P5/32 (对应聚类结果中的大尺度: 41x83, 112x39, 179x207)
 
 # YOLOv5 v6.0 backbone
 backbone:
