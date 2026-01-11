@@ -6,6 +6,7 @@ class MBSF(nn.Module):
         super().__init__()
         self.c2 = c2
         self.dilation = dilation
+        self.residual_proj = nn.Identity() if c1 == c2 else nn.Conv2d(c1, c2, 1, 1, 0, bias=False)
         self._build(c1)
 
     def _build(self, c1):
@@ -58,6 +59,7 @@ class MBSF(nn.Module):
         return y
     def forward(self, x):
         b, c, H, W = x.shape
+        identity = x
         q0, q1, q2, q3 = self._split(x)
         def proc(q):
             y1 = self.b1(q)
@@ -71,4 +73,5 @@ class MBSF(nn.Module):
         o1 = proc(q1)
         o2 = proc(q2)
         o3 = proc(q3)
-        return self._merge(o0, o1, o2, o3, H, W)
+        out = self._merge(o0, o1, o2, o3, H, W)
+        return out + self.residual_proj(identity)
