@@ -75,3 +75,80 @@ class MBSF(nn.Module):
         o3 = proc(q3)
         out = self._merge(o0, o1, o2, o3, H, W)
         return out + self.residual_proj(identity)
+
+
+class CSG_Attention(nn.Module):
+    def __init__(self, c_local, c_global):
+        super().__init__()
+        r = 16
+        self.mlp_global = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(c_global, max(1, c_global // r), 1),
+            nn.ReLU(),
+            nn.Conv2d(max(1, c_global // r), c_local, 1),
+            nn.Sigmoid(),
+        )
+        self.mlp_local = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(c_local, max(1, c_local // r), 1),
+            nn.ReLU(),
+            nn.Conv2d(max(1, c_local // r), c_global, 1),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, x_local, x_global):
+        gate_g = self.mlp_global(x_global)
+        gate_l = self.mlp_local(x_local)
+        x_local_refined = x_local * gate_g
+        x_global_refined = x_global * gate_l
+        return x_local_refined, x_global_refined
+
+
+class DLDF_Fusion(nn.Module):
+    def __init__(self, c_in, c_out):
+        super().__init__()
+        mid_c = c_out // 2
+        self.branch_local = nn.Sequential(
+            nn.Conv2d(c_in, mid_c, 3, 1, 1, bias=False),
+            nn.BatchNorm2d(mid_c),
+            nn.SiLU(),
+        )
+        self.branch_context = nn.Sequential(
+            nn.Conv2d(c_in, mid_c, 3, 1, 2, dilation=2, bias=False),
+            nn.BatchNorm2d(mid_c),
+            nn.SiLU(),
+        )
+        self.conv_out = nn.Conv2d(c_out, c_out, 1, bias=False)
+        self.bn = nn.BatchNorm2d(c_out)
+        self.act = nn.SiLU()
+
+    def channel_shuffle(self, x, groups):
+        b, c, h, w = x.shape
+        x = x.view(b, groups, c // groups, h, w)
+        x = x.transpose(1, 2).contiguous()
+        x = x.view(b, c, h, w)
+        return x
+
+    def forward(self, x):
+        x1 = self.branch_local(x)
+        x2 = self.branch_context(x)
+        out = torch.cat([x1, x2], dim=1)
+        out = self.channel_shuffle(out, 2)
+        return self.act(self.bn(self.conv_out(out)))
+
+
+class SAR_Fusion_Block(nn.Module):
+    def __init__(self, c1, c2):
+        super().__init__()
+        c_local, c_global = c1[0], c1[1]
+        c_out = c2
+        self.csg = CSG_Attention(c_local, c_global)
+        self.dldf = DLDF_Fusion(c_local + c_global, c_out)
+
+    def forward(self, x):
+        x_local, x_global = x[0], x[1]
+        x_l, x_g = self.csg(x_local, x_global)
+        x_cat = torch.cat([x_l, x_g], dim=1)
+        out = self.dldf(x_cat)
+        return out
+
