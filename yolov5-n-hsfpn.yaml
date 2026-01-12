@@ -5,9 +5,9 @@ nc: 1  # number of classes
 depth_multiple: 0.33  # model depth multiple
 width_multiple: 0.25  # layer channel multiple
 anchors:
-  - [10,13, 18,9, 15,36]      # P3/8  (对应聚类结果中的小尺度: 10x13, 18x9, 15x36) 
-  - [49,14, 29,35, 46,27]      # P4/16 (对应聚类结果中的中尺度: 49x14, 29x35, 46x27) 
-  - [41,83, 112,39, 179,207]    # P5/32 (对应聚类结果中的大尺度: 41x83, 112x39, 179x207)
+  - [10,12, 20,7, 12,35]      # P3/8
+  - [30,22, 52,14, 22,39]     # P4/16
+  - [37,38, 58,24, 70,168]    # P5/32
 
 # YOLOv5 v6.0 backbone
 backbone:
@@ -32,24 +32,30 @@ backbone:
 
 # YOLOv5 v6.0 head
 head:
-  [[-1, 1, Conv, [512, 1, 1]],                   # 13
-   [-1, 1, nn.Upsample, [None, 2, 'nearest']],   # 14
-   [[9, -1], 1, SDP, [20, 20]],                  # 15
-   [[-1, 14], 1, Concat, [1]],                   # 16 residual concat
-   [-1, 1, Conv, [256, 1, 1]],                   # 17 channel adjust
-   [-1, 1, nn.Upsample, [None, 2, 'nearest']],   # 18
-   [3, 1, Conv, [256, 3, 2]],                    # 19 downsample P2 HFP to P3
-   [[19, -1], 1, SDP, [20, 20]],                 # 20
-   [[-1, 18], 1, Concat, [1]],                   # 21 residual concat
-   [-1, 1, Conv, [256, 1, 1]],                   # 22 channel adjust
+  [[-1, 1, Conv, [512, 1, 1]],                   # 13 (P5 特征处理)
+   [-1, 1, nn.Upsample, [None, 2, 'nearest']],   # 14 (P5 上采样)
 
-   [-1, 1, Conv, [256, 3, 2]],                   # 23 down to P4
-   [[-1, 17], 1, Concat, [1]],                   # 24 cat P4 route
-   [-1, 3, C3, [512, False]],                    # 25
+   [[9, -1], 1, SAR_Fusion_Block, [512]],        # 15 (新融合模块: CSG去噪 + DLDF融合)
 
-   [-1, 1, Conv, [512, 3, 2]],                   # 26 down to P5
-   [[-1, 13], 1, Concat, [1]],                   # 27 cat P5 route
-   [-1, 3, C3, [1024, False]],                   # 28
+   [-1, 1, Conv, [256, 1, 1]],                   # 16 (通道压缩)
+   [-1, 1, nn.Upsample, [None, 2, 'nearest']],   # 17 (P4 上采样)
 
-   [[22, 25, 28], 1, Detect, [nc, anchors]],     # 29
+   [3, 1, Conv, [256, 3, 2]],                    # 18 (P2 HFP 下采样处理)
+
+   [[18, -1], 1, SAR_Fusion_Block, [256]],       # 19 (新融合模块: CSG去噪 + DLDF融合)
+
+   [-1, 1, Conv, [256, 1, 1]],                   # 20
+   [-1, 1, Conv, [256, 3, 2]],                   # 21
+
+   [[-1, 16], 1, Concat, [1]],                   # 22 (Concat P4 路由)
+
+   [-1, 3, C3, [512, False]],                    # 23
+
+   [-1, 1, Conv, [512, 3, 2]],                   # 24
+
+   [[-1, 13], 1, Concat, [1]],                   # 25 (Concat P5 路由)
+
+   [-1, 3, C3, [1024, False]],                   # 26
+
+   [[20, 23, 26], 1, Detect, [nc, anchors]],     # 27
   ]
