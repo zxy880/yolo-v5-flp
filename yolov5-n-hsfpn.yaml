@@ -12,50 +12,53 @@ anchors:
 # YOLOv5 v6.0 backbone
 backbone:
   # [from, number, module, args]
+  # === P1/P2 浅层: 保持稳健，防止小目标破碎 ===
   [[-1, 1, Conv, [64, 6, 2, 2]],   # 0-P1/2
    [-1, 1, Conv, [128, 3, 2]],     # 1-P2/4
-   [-1, 3, MBSF, [128, 5]],        # 2-P2 (MBSF 128)
-   [-1, 1, HFP, [0.25, 16]],       # 3-HFP (P2 Lateral)
+   [-1, 3, C3, [128]],             # 2-P2 (使用原版C3，保留完整像素细节)
 
-   [2, 1, DCN, [256, 3, 2]],       # 4-P3/8 (DCN) from P2 MBSF
-   [-1, 6, MBSF, [256, 5]],        # 5-P3 (MBSF 256)
-   [4, 1, nn.Identity, []],        # 6-Identity (P3 无侧向支路)
+   # === P3 层: 保持稳健 ===
+   [-1, 1, Conv, [256, 3, 2]],     # 3-P3/8
+   [-1, 6, C3, [256]],             # 4-P3 (使用原版C3)
 
-   [5, 1, Conv, [512, 3, 2]],      # 7-P4/16 (Conv) from P3 MBSF
-   [-1, 9, MBSF, [512, 5]],        # 8-P4 (MBSF 512)
-   [7, 1, HFP, [0.25, 16]],        # 9-HFP (P4 Lateral) from 7
+   # === P4 层: 开启"上帝视角" (Context) + "精准定位" (CA) ===
+   [-1, 1, Conv, [512, 3, 2]],     # 5-P4/16
+   [-1, 9, C3_Context_CA, [512]],  # 6-P4 (深层开始引入空洞卷积和注意力)
 
-   [-1, 1, Conv, [1024, 3, 2]],    # 10-P5/32 (Conv)
-   [-1, 3, C3, [1024]],            # 11
-   [-1, 1, SPPF, [1024, 5]],       # 12-P5
+   # === P5 层: 最大化全局信息 ===
+   [-1, 1, Conv, [1024, 3, 2]],    # 7-P5/32
+   [-1, 3, C3_Context_CA, [1024]], # 8-P5 (深层强化)
+
+   # === 末端聚合: 用 MBSF 替代 SPPF ===
+   # 确保 MBSF 模块已在 mbsf.py 中定义并在 yolo.py 中注册
+   [-1, 1, MBSF, [1024]],          # 9-P5 Context (MBSF移至此处，统筹全局)
   ]
 
 # YOLOv5 v6.0 head
 head:
-  [[-1, 1, Conv, [512, 1, 1]],                   # 13 (P5 特征处理)
-   [-1, 1, nn.Upsample, [None, 2, 'nearest']],   # 14 (P5 上采样)
+  # === 第一次融合 (P5 + P4) ===
+  [[-1, 1, Conv, [512, 1, 1]],                   # 10 (P5 特征处理)
+   [-1, 1, nn.Upsample, [None, 2, 'nearest']],   # 11
+   [[6, -1], 1, SAR_Fusion_Block, [512]],        # 12 (P4 + P5_up 融合，去噪)
 
-   [[9, -1], 1, SAR_Fusion_Block, [512]],        # 15 (新融合模块: CSG去噪 + DLDF融合)
+   # === 第二次融合 (P4 + P2) - 沿用HSFPN思路 ===
+   [-1, 1, Conv, [256, 1, 1]],                   # 13 (通道调整)
+   [-1, 1, nn.Upsample, [None, 2, 'nearest']],   # 14
+   [2, 1, Conv, [256, 3, 2]],                    # 15 (从Layer 2(P2)取特征，下采样对齐)
+   [[15, -1], 1, SAR_Fusion_Block, [256]],       # 16 (P2_down + P4_up 融合，去噪)
 
-   [-1, 1, Conv, [256, 1, 1]],                   # 16 (通道压缩)
-   [-1, 1, nn.Upsample, [None, 2, 'nearest']],   # 17 (P4 上采样)
+   # === PANet 底部聚合 (Bottom-up) ===
+   [-1, 1, Conv, [256, 1, 1]],                   # 17 (P3 输出)
 
-   [3, 1, Conv, [256, 3, 2]],                    # 18 (P2 HFP 下采样处理)
+   [-1, 1, Conv, [256, 3, 2]],                   # 18
+   [[-1, 13], 1, Concat, [1]],                   # 19 (Concat P4 路由: Layer 13)
+   [-1, 3, C3_Context_CA, [512, False]],         # 20 (P4 输出，使用Context_CA增强)
 
-   [[18, -1], 1, SAR_Fusion_Block, [256]],       # 19 (新融合模块: CSG去噪 + DLDF融合)
+   [-1, 1, Conv, [512, 3, 2]],                   # 21
+   [[-1, 10], 1, Concat, [1]],                   # 22 (Concat P5 路由: Layer 10)
+   [-1, 3, C3_Context_CA, [1024, False]],        # 23 (P5 输出，使用Context_CA增强)
 
-   [-1, 1, Conv, [256, 1, 1]],                   # 20
-   [-1, 1, Conv, [256, 3, 2]],                   # 21
-
-   [[-1, 16], 1, Concat, [1]],                   # 22 (Concat P4 路由)
-
-   [-1, 3, C3, [512, False]],                    # 23
-
-   [-1, 1, Conv, [512, 3, 2]],                   # 24
-
-   [[-1, 13], 1, Concat, [1]],                   # 25 (Concat P5 路由)
-
-   [-1, 3, C3, [1024, False]],                   # 26
-
-   [[20, 23, 26], 1, Detect, [nc, anchors]],     # 27
+   # === Detect 头 ===
+   [[17, 20, 23], 1, Detect, [nc, anchors]],     # 24
   ]
+
